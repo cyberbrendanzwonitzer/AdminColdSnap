@@ -11,11 +11,33 @@ const app = express();
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json());
 
+function getHostedConfigError() {
+  return {
+    ok: false,
+    error: "MAIN_API_BASE is not configured for hosted admin deployment. Set MAIN_API_BASE to your deployed CryoChamber API URL (example: https://your-main-api.up.railway.app)."
+  };
+}
+
 // Proxy admin APIs to main server
-const createProxyRoute = (name, path) => {
-  app.get(path, async (_req, res) => {
+const createProxyRoute = (name, routePath) => {
+  app.get(routePath, async (req, res) => {
+    const requestHost = String(req.get("host") || "").toLowerCase();
+    const runningHosted = requestHost && !requestHost.includes("localhost") && !requestHost.includes("127.0.0.1");
+    const pointsToLocalhost = config.mainApiBase.includes("localhost") || config.mainApiBase.includes("127.0.0.1");
+
+    if (!config.mainApiBase) {
+      return res.status(500).json(getHostedConfigError());
+    }
+
+    if (runningHosted && pointsToLocalhost) {
+      return res.status(500).json({
+        ok: false,
+        error: `MAIN_API_BASE is currently set to ${config.mainApiBase}, which is not reachable from hosted infrastructure. Set MAIN_API_BASE to your deployed CryoChamber API URL (example: https://your-main-api.up.railway.app).`
+      });
+    }
+
     try {
-      const url = `${config.mainApiBase}${path}`;
+      const url = `${config.mainApiBase}${routePath}`;
       console.log(`Proxying ${name} from ${url}`);
       
       const response = await fetch(url);
@@ -74,12 +96,12 @@ const createProxyRoute = (name, path) => {
           }
         };
         
-        return res.json(mockSnapshots[path] || { ok: false, error: "Not found" });
+        return res.json(mockSnapshots[routePath] || { ok: false, error: "Not found" });
       }
       
       res.status(503).json({
         ok: false,
-        error: `Cannot reach main API at ${config.mainApiBase}. Make sure the server is running, or enable ENABLE_MOCK_DATA=true for mock data.`
+        error: `Cannot reach main API at ${config.mainApiBase}. Verify MAIN_API_BASE points to your deployed CryoChamber API URL, or enable ENABLE_MOCK_DATA=true for mock data.`
       });
     }
   });
